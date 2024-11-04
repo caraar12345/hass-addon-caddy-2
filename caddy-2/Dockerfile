@@ -9,10 +9,11 @@ RUN \
   set -eux \
   \
   && mkdir -p \
-    /data/caddy \
+  /data/caddy \
   \
   && apk add --no-cache \
-    nss-tools=3.105-r0
+  nss-tools=3.105-r0 \
+  python3 
 
 # https://github.com/caddyserver/caddy/releases
 ENV CADDY_VERSION="v2.8.4"
@@ -42,11 +43,11 @@ COPY rootfs /
 # Alpine 3.16 includes nsswitch.conf
 RUN set -eux \
   \
-	&& if [ -e /etc/nsswitch.conf ]; then \
-		grep '^hosts: files dns' /etc/nsswitch.conf; \
-	else \
-		echo 'hosts: files dns' > /etc/nsswitch.conf; \
-	fi
+  && if [ -e /etc/nsswitch.conf ]; then \
+  grep '^hosts: files dns' /etc/nsswitch.conf; \
+  else \
+  echo 'hosts: files dns' > /etc/nsswitch.conf; \
+  fi
 
 ENV XDG_CONFIG_HOME=/data
 ENV XDG_DATA_HOME=/ssl
@@ -62,20 +63,20 @@ ARG BUILD_VERSION
 
 # Labels
 LABEL \
-    io.hass.name="${BUILD_NAME}" \
-    io.hass.description="${BUILD_DESCRIPTION}" \
-    io.hass.arch="${BUILD_ARCH}" \
-    io.hass.type="addon" \
-    io.hass.version=${BUILD_VERSION} \
-    maintainer="Einschmidt" \
-    org.opencontainers.image.title="${BUILD_NAME}" \
-    org.opencontainers.image.description="${BUILD_DESCRIPTION}" \
-    org.opencontainers.image.vendor="Einschmidt" \
-    org.opencontainers.image.authors="einschmidt" \
-    org.opencontainers.image.licenses="MIT" \
-    org.opencontainers.image.url="https://google.com" \
-    org.opencontainers.image.source="https://github.com/${BUILD_REPOSITORY}" \
-    org.opencontainers.image.documentation="https://github.com/${BUILD_REPOSITORY}/blob/main/README.md" \
-    org.opencontainers.image.created=${BUILD_DATE} \
-    org.opencontainers.image.revision=${BUILD_REF} \
-    org.opencontainers.image.version=${BUILD_VERSION}
+  io.hass.name="${BUILD_NAME}" \
+  io.hass.description="${BUILD_DESCRIPTION}" \
+  io.hass.arch="${BUILD_ARCH}" \
+  io.hass.type="addon" \
+  io.hass.version=${BUILD_VERSION} \
+  maintainer="caraar12345" \
+  org.opencontainers.image.title="${BUILD_NAME}" \
+  org.opencontainers.image.description="${BUILD_DESCRIPTION}" \
+  org.opencontainers.image.vendor="caraar12345" \
+  org.opencontainers.image.authors="einschmidt, caraar12345" \
+  org.opencontainers.image.licenses="MIT" \
+  org.opencontainers.image.url="https://google.com" \
+  org.opencontainers.image.source="https://github.com/${BUILD_REPOSITORY}" \
+  org.opencontainers.image.documentation="https://github.com/${BUILD_REPOSITORY}/blob/main/README.md" \
+  org.opencontainers.image.created=${BUILD_DATE} \
+  org.opencontainers.image.revision=${BUILD_REF} \
+  org.opencontainers.image.version=${BUILD_VERSION}

@@ -121,6 +121,12 @@ main() {
         export "${name}=${value}"
     done
 
+    # Install custom Python packages
+    for package in $(bashio::config 'python_packages|keys'); do
+        bashio::log.info "Installing Python package ${package}"
+        python3 -m pip install ${package}
+    done
+
     # Format Caddyfile
     # bashio::log.info "Format Caddyfile"
     # "${CADDY_PATH}" fmt "${CONFIG_PATH}"

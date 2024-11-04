@@ -1,22 +1,22 @@
 ---
 name: Caddy 2
-version: dev
+version: 2.0.0-dev+1
 slug: caddy-2
 description: Open source web and proxy server with automatic HTTPS
-url: "https://github.com/einschmidt/addon-caddy-2"
+url: "https://github.com/caraar12345/hass-addon-caddy-2"
 arch:
-  - armhf
-  - armv7
-  - amd64
-  - aarch64
+- armhf
+- armv7
+- amd64
+- aarch64
 startup: services
 map:
-  - type: share
-    read_only: false
-  - type: addon_config
-    read_only: false
-  - type: ssl
-    read_only: false
+- type: share
+  read_only: false
+- type: addon_config
+  read_only: false
+- type: ssl
+  read_only: false
 host_network: true
 options:
   non_caddyfile_config:
@@ -26,6 +26,7 @@ options:
     port: 8123
   args: []
   env_vars: []
+  python_packages: []
   log_level: info
 schema:
   non_caddyfile_config:
@@ -36,13 +37,15 @@ schema:
   caddy_upgrade: bool?
   caddy_fmt: bool?
   args:
-    - str
+  - str
   env_vars:
-    - name: str
-      value: str
+  - name: str
+    value: str
+  python_packages:
+  - str
   log_level: list(trace|debug|info|notice|warning|error|fatal)
 environment:
   LOG_FORMAT: "{LEVEL}: {MESSAGE}"
 init: false
 breaking_versions:
-  - 2.0.0
+- 2.0.0
