@@ -16,5 +16,5 @@ jobs:
           --test \
           --all \
           --target caddy-2 \
-          --image-name caddy-2-{arch}
+          --image caddy-2-{arch}
           --docker-hub ghcr.io/caraar12345/hass-addon-caddy-2
