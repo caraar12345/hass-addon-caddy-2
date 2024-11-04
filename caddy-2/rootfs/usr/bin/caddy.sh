@@ -122,7 +122,7 @@ main() {
     done
 
     # Install custom Python packages
-    for package in $(bashio::config 'python_packages|keys'); do
+    for package in $(bashio::config 'python_packages'); do
         bashio::log.info "Installing Python package ${package}"
         python3 -m pip install ${package}
     done
