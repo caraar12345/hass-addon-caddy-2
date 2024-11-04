@@ -22,9 +22,8 @@ jobs:
       permissions:
         contents: read
         packages: write
-
       with:
         args: |
           --all \
-          --target addon-folder \
-          --docker-hub user-name-or-space-name
+          --target caddy-2 \
+          --docker-hub ghcr.io/caraar12345/hass-addon-caddy-2
