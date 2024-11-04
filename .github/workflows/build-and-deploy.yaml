@@ -6,6 +6,9 @@ on:
 
 jobs:
   publish:
+    permissions:
+      contents: read
+      packages: write
     name: Publish
     runs-on: ubuntu-latest
     steps:
@@ -19,9 +22,6 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Publish
       uses: home-assistant/builder@master
-      permissions:
-        contents: read
-        packages: write
       with:
         args: |
           --all \
