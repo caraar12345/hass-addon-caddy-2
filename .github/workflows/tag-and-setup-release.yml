@@ -12,7 +12,7 @@ jobs:
       - name: Read version from config.yml
         id: read_version
         run: |
-          VERSION=$(grep '^version:' caddy-2/config.yml | awk '{print $2}' | tr -d \")
+          VERSION=$(grep '^version:' caddy-2/config.yaml | awk '{print $2}' | tr -d \")
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
       - name: Check if tag exists
         id: check_tag
