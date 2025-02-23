@@ -12,7 +12,7 @@ RUN \
   /data/caddy \
   \
   && apk add --no-cache \
-  nss-tools=3.105-r0 \
+  nss-tools \
   python3 py3-pip git openssh
 
 # https://github.com/caddyserver/caddy/releases
