@@ -1,6 +1,7 @@
-name: "Test"
+name: "Test HA addon build"
 
-on: [ push, pull_request ]
+on:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,6 +15,7 @@ jobs:
       with:
         args: |
           --test \
-          --all \
+          --aarch64 --amd64 \
           --target caddy-2 \
-          --docker-hub ghcr.io/caraar12345/hass-addon-caddy-2
+          --docker-hub ghcr.io/${{github.repository}} \
+          --image hass-{arch}

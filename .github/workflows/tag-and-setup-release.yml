@@ -1,0 +1,55 @@
+name: Create tag for a new version
+on:
+  push:
+    branches:
+      - main
+jobs:
+  check-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Read version from config.yml
+        id: read_version
+        run: |
+          VERSION=$(grep '^version:' caddy-2/config.yml | awk '{print $2}' | tr -d \")
+          echo "version=v$VERSION" >> $GITHUB_OUTPUT
+      - name: Check if tag exists
+        id: check_tag
+        env:
+          VERSION: ${{ steps.read_version.outputs.version }}
+        run: |
+          git fetch --tags
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION exists."
+            echo "tag=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $VERSION does not exist."
+            echo "tag=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Create tag if it does not exist
+        id: create_tag
+        if: steps.check_tag.outputs.tag == 'false'
+        env:
+          VERSION: ${{ steps.read_version.outputs.version }}
+        run: |-
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          echo "Tag $VERSION created."
+          echo "tag=true" >> $GITHUB_OUTPUT
+      - name: Trigger build workflow
+        if: steps.create_tag.outputs.tag == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.read_version.outputs.version }}
+        run: |-
+          gh workflow run build-and-deploy.yaml --ref $VERSION
+        
+      - name: Trigger test build workflow
+        if: steps.check_tag.outputs.tag == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.read_version.outputs.version }}
+        run: |-
+          gh workflow run test-build.yaml --ref $VERSION
+

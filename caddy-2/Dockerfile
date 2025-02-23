@@ -16,7 +16,7 @@ RUN \
   python3 py3-pip git openssh
 
 # https://github.com/caddyserver/caddy/releases
-ENV CADDY_VERSION="v2.8.4"
+ENV CADDY_VERSION="v2.9.1"
 
 # Install Caddy
 ARG BUILD_ARCH=amd64
