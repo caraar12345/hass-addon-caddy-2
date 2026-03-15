@@ -21,6 +21,8 @@ prepare_caddy() {
     bashio::log.info "Checking path: ${CUSTOM_CADDY_PATH}"
     if bashio::fs.file_exists "${CUSTOM_CADDY_PATH}"; then
         bashio::log.info "Found custom Caddy binary at ${CUSTOM_CADDY_PATH}"
+        bashio::log.info "Custom Caddy has following modules installed:"
+        "${CUSTOM_CADDY_PATH}" list-modules -s
         export CUSTOM_CADDY=true
         export CADDY_PATH="${CUSTOM_CADDY_PATH}"
     else
