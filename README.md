@@ -1,4 +1,4 @@
-# Home Assistant Add-on: Caddy 2
+# Home Assistant App: Caddy 2
 
 > [!NOTE]  
 > This is a fork of @einschmidt's [Caddy 2 addon](https://github.com/einschmidt/addon-caddy-2) from their [Home Assistant addon repo](https://github.com/einschmidt/hassio-addons). Thanks for all your awesome work -- and for making it MIT so I can build on top of it ♥️

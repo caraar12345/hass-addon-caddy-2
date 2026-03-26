@@ -5,18 +5,20 @@
   "labels": ["dependencies", "no-stale"],
   "commitMessagePrefix": "⬆️",
   "commitMessageTopic": "{{depName}}",
-  "regexManagers": [
+  "customManagers": [
     {
-      "fileMatch": ["/Dockerfile$", "/build.yaml$"],
+      "customType": "regex",
+      "managerFilePatterns": ["//Dockerfile$/", "//build.yaml$/"],
       "matchStringsStrategy": "any",
       "matchStrings": [
         "ARG BUILD_FROM=(?<depName>.*?):(?<currentValue>.*?)\\s+",
-        "(aarch64|amd64|armhf|armv7|i386):\\s[\"']?(?<depName>.*?):(?<currentValue>.*?)[\"']?\\s"
+        "(aarch64|amd64):\\s[\"']?(?<depName>.*?):(?<currentValue>.*?)[\"']?\\s"
       ],
       "datasourceTemplate": "docker"
     },
     {
-      "fileMatch": ["/Dockerfile$"],
+      "customType": "regex",
+      "managerFilePatterns": ["//Dockerfile$/"],
       "matchStrings": [
         "ENV CADDY_VERSION=[\"']?(?<currentValue>v[\\d.]+)[\"']?"
       ],
@@ -24,14 +26,15 @@
       "depNameTemplate": "caddyserver/caddy"
     },
     {
-      "fileMatch": ["/Dockerfile$"],
+      "customType": "regex",
+      "managerFilePatterns": ["//Dockerfile$/"],
       "matchStringsStrategy": "any",
       "matchStrings": [
         "\\s\\s(?<package>[a-z0-9-]+)=(?<currentValue>[a-z0-9-_.]+)\\s+"
       ],
       "versioningTemplate": "loose",
       "datasourceTemplate": "repology",
-      "depNameTemplate": "alpine_3_20/{{package}}"
+      "depNameTemplate": "alpine_3_23/{{package}}"
     }
   ],
   "packageRules": [
@@ -40,11 +43,11 @@
       "automerge": true
     },
     {
-      "groupName": "Add-on base image",
+      "groupName": "App base image",
       "matchDatasources": ["docker"]
     },
     {
-      "groupName": "Add-on base image",
+      "groupName": "App base image",
       "matchDatasources": ["docker"],
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
