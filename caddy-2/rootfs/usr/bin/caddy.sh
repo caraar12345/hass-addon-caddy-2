@@ -11,6 +11,50 @@
 # binary at the specified path. If found, exports custom Caddy variables;
 # otherwise, uses the built-in Caddy binary path.
 # Finally, checks the Caddy version.
+prepare_secrets() {
+    bashio::log.info 'Preparing secrets...'
+
+    local secrets_file="/share/caddy/secrets.yaml.age"
+    local identity
+
+    if ! bashio::config.has_value 'age_identity'; then
+        bashio::log.info "No age_identity configured, skipping secrets"
+        return 0
+    fi
+
+    identity=$(bashio::config 'age_identity')
+
+    if ! bashio::fs.file_exists "${secrets_file}"; then
+        bashio::log.info "No secrets.yaml.age found at ${secrets_file}, skipping"
+        return 0
+    fi
+
+    bashio::log.info "Decrypting ${secrets_file}..."
+
+    local decrypted
+    if ! decrypted=$(age --decrypt -i <(printf '%s' "${identity}") "${secrets_file}"); then
+        bashio::log.error "Failed to decrypt ${secrets_file}"
+        return 1
+    fi
+
+    mkdir -p /run/secrets
+    chmod 700 /run/secrets
+
+    while IFS='=' read -r name value; do
+        [[ -z "${name}" ]] && continue
+        bashio::log.info "Writing secret: ${name}"
+        printf '%s' "${value}" > "/run/secrets/${name}"
+        chmod 600 "/run/secrets/${name}"
+    done < <(python3 -c "
+import yaml, sys
+data = yaml.safe_load(sys.stdin)
+for k, v in data.items():
+    print(f'{k}={v}')
+" <<< "${decrypted}")
+
+    bashio::log.info "Secrets written to /run/secrets/"
+}
+
 prepare_caddy() {
     bashio::log.info 'Prepare Caddy...'
 
@@ -132,6 +176,9 @@ main() {
     # Format Caddyfile
     # bashio::log.info "Format Caddyfile"
     # "${CADDY_PATH}" fmt "${CONFIG_PATH}"
+
+    # Decrypt and prepare secrets
+    prepare_secrets
 
     # Prepare Caddy
     prepare_caddy

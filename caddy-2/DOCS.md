@@ -206,6 +206,51 @@ Controls the verbosity of the log output from the app. This setting is useful fo
 
 Each level includes the messages from more severe levels. For example, `debug` also includes `info` messages. The default setting is `info`, which is recommended unless troubleshooting.
 
+## Age-Encrypted Secrets
+
+Caddy v2.8+ supports the `{file./path/to/file}` placeholder, which reads a value from a file at runtime. This addon can decrypt an age-encrypted YAML file at startup and write each secret as a file under `/run/secrets/`, making them available to your Caddyfile without storing plaintext credentials in your config.
+
+### Setup
+
+1. Create a flat YAML file with your secrets:
+
+```yaml
+cloudflare_token: my-token-here
+some_api_key: abc123
+```
+
+2. Encrypt it with age:
+
+```bash
+age -r age1... -o /share/caddy/secrets.yaml.age secrets.yaml
+```
+
+Place the encrypted file at `/share/caddy/secrets.yaml.age`.
+
+3. Set the `age_identity` option in the addon config to the contents of your age identity file (the private key):
+
+```yaml
+age_identity: "AGE-SECRET-KEY-1..."
+```
+
+At startup, the addon will decrypt the secrets and write each key as a file under `/run/secrets/`.
+
+### Using Secrets in the Caddyfile
+
+Reference secrets using the `{file.}` placeholder:
+
+```
+{
+  acme_dns cloudflare {file./run/secrets/cloudflare_token}
+}
+```
+
+### Option: `age_identity`
+
+The age identity (private key) used to decrypt `/share/caddy/secrets.yaml.age`. Paste the contents of your age identity file directly into this field. If not set, secret decryption is skipped.
+
+---
+
 ## Advanced Usage: Custom Binaries & Plugins
 
 ### Overview
