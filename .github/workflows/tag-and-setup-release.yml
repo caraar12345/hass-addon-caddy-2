@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - main
+  # Dispatched by upstream-caddy.yaml, whose GITHUB_TOKEN push doesn't trigger
+  # the push event above.
+  workflow_dispatch:
 jobs:
   check-tag:
     runs-on: ubuntu-latest
