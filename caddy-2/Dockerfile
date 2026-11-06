@@ -13,10 +13,10 @@ RUN \
   \
   && apk add --no-cache \
   nss-tools=3.118.1-r0 \
-  python3 py3-pip py3-yaml git openssh age
+  python3 py3-pip py3-yaml git openssh age mosquitto-clients
 
 # https://github.com/caddyserver/caddy/releases
-ENV CADDY_VERSION="v2.11.2"
+ENV CADDY_VERSION="v2.11.9"
 
 # Install Caddy
 ARG BUILD_ARCH=amd64

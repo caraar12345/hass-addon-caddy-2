@@ -72,9 +72,20 @@ jobs:
             exit 1
           fi
 
-          echo "Current: $current, upstream: $latest"
-          newest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)
-          if [ "$latest" = "$current" ] || { [ "$newest" = "$current" ] && [ -z "${REQUESTED:-}" ]; }; then
+          # The add-on version is <caddy version>-aaroncarson.N. If something
+          # else (e.g. a Renovate PR) bumped CADDY_VERSION without it, the
+          # add-on version still needs to catch up.
+          addon_base=$(sed -nE 's/^version: *"?([0-9][0-9.]*).*/\1/p' caddy-2/config.yaml)
+
+          echo "Dockerfile: $current, add-on: $addon_base, upstream: $latest"
+          if [ -n "${REQUESTED:-}" ]; then
+            target="$latest"
+          else
+            # Never move backwards.
+            target=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)
+          fi
+
+          if [ "$target" = "$current" ] && [ "$addon_base" = "${target#v}" ]; then
             echo "Up to date."
             echo "bump=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -83,8 +94,8 @@ jobs:
           {
             echo "bump=true"
             echo "current=$current"
-            echo "latest=$latest"
-            echo "addon_version=${latest#v}-aaroncarson.1"
+            echo "latest=$target"
+            echo "addon_version=${target#v}-aaroncarson.1"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check the release has the binaries the Dockerfile downloads
@@ -122,7 +133,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "⬆️ Update caddyserver/caddy to ${LATEST}" \
-            -m "https://github.com/caddyserver/caddy/releases/tag/${LATEST} (was ${CURRENT})"
+            -m "https://github.com/caddyserver/caddy/releases/tag/${LATEST} (Dockerfile was ${CURRENT})"
           git push origin HEAD:main
 
       - name: Tag, build and publish
