@@ -25,40 +25,62 @@ idle() {
     exec sleep infinity
 }
 
-if bashio::config.false 'update_entity'; then
-    bashio::log.info "Caddy update entity disabled (update_entity: false)"
-    idle
-fi
-if ! bashio::fs.file_exists "${CADDY_BIN}"; then
-    bashio::log.info "No custom Caddy binary, so no Caddy update entity (the add-on update covers the built-in one)"
-    idle
-fi
-if ! bashio::services.available "mqtt"; then
-    bashio::log.info "No MQTT broker available, so no Caddy update entity"
-    idle
-fi
+MQTT_ARGS=()
+PUB_FAILED=false
 
-MQTT_ARGS=(
-    -h "$(bashio::services mqtt 'host')"
-    -p "$(bashio::services mqtt 'port')"
-    -u "$(bashio::services mqtt 'username')"
-    -P "$(bashio::services mqtt 'password')"
-)
-if bashio::var.true "$(bashio::services mqtt 'ssl')"; then
-    MQTT_ARGS+=(--insecure --capath /etc/ssl/certs)
-fi
+load_mqtt() {
+    MQTT_ARGS=(
+        -h "$(bashio::services mqtt 'host')"
+        -p "$(bashio::services mqtt 'port')"
+        -u "$(bashio::services mqtt 'username')"
+        -P "$(bashio::services mqtt 'password')"
+    )
+    if bashio::var.true "$(bashio::services mqtt 'ssl')"; then
+        MQTT_ARGS+=(--capath /etc/ssl/certs)
+    fi
+}
 
 pub() {
     # pub <topic> <payload> [extra mosquitto_pub args...]
+    # Never fails (so errexit can't kill the loop); sets PUB_FAILED instead.
     local topic="$1" payload="$2"
     shift 2
-    mosquitto_pub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-pub" -q 1 "$@" -t "${topic}" -m "${payload}" \
-        || bashio::log.warning "Couldn't publish to MQTT topic ${topic}"
+    if ! mosquitto_pub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-pub" -q 1 "$@" -t "${topic}" -m "${payload}"; then
+        bashio::log.warning "Couldn't publish to MQTT topic ${topic}"
+        PUB_FAILED=true
+    fi
 }
+
+disabled_reason=""
+if bashio::config.false 'update_entity'; then
+    disabled_reason="disabled (update_entity: false)"
+elif ! bashio::fs.file_exists "${CADDY_BIN}"; then
+    disabled_reason="not needed: no custom Caddy binary (the add-on update covers the built-in one)"
+fi
+if [ -n "${disabled_reason}" ]; then
+    bashio::log.info "Caddy update entity ${disabled_reason}"
+    if bashio::services.available "mqtt"; then
+        # Remove an entity published while it was enabled.
+        load_mqtt
+        mosquitto_pub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-pub" -q 1 -r -n -t "${DISCOVERY_TOPIC}" \
+            || bashio::log.warning "Couldn't clear the Caddy update entity"
+    fi
+    idle
+fi
+
+# The broker may be installed after this add-on starts.
+if ! bashio::services.available "mqtt"; then
+    bashio::log.info "No MQTT broker available yet; the Caddy update entity will appear once there is one"
+    until bashio::services.available "mqtt"; do
+        sleep 300
+    done
+fi
+load_mqtt
 
 LATEST_VERSION=""
 LATEST_URL=""
 LAST_CHECK=0
+NEED_ANNOUNCE=false
 
 installed_version() {
     "${CADDY_BIN}" version 2>/dev/null | awk '{print $1}'
@@ -143,12 +165,16 @@ upgrade() {
         return
     fi
 
-    if [ "${after}" = "${before}" ]; then
-        bashio::log.info "Caddy is already at ${after}"
+    # Same Caddy version can still mean rebuilt plugins, so compare the files.
+    if cmp -s "${CADDY_BIN}" "${CADDY_BIN}.bak"; then
+        bashio::log.info "Caddy is already at ${after} with the latest plugins"
         publish_state false
         return
     fi
 
+    # caddy.sh validates the config with the new binary on the next start and
+    # goes back to caddy.bak if it can't load it.
+    touch "${CADDY_BIN}.upgraded"
     bashio::log.info "Caddy upgraded ${before} -> ${after} (previous binary kept at ${CADDY_BIN}.bak); restarting the add-on"
     publish_state true
     bashio::addon.restart
@@ -160,30 +186,44 @@ shutdown() {
 }
 trap shutdown TERM INT
 
+announce() {
+    # Retained discovery and availability, republished periodically and after
+    # MQTT failures in case the broker lost its retained messages.
+    PUB_FAILED=false
+    publish_discovery
+    pub "${TOPIC}/availability" "online" -r
+    publish_state false
+    NEED_ANNOUNCE="${PUB_FAILED}"
+}
+
 check_latest
-publish_discovery
-pub "${TOPIC}/availability" "online" -r
-publish_state false
+announce
 bashio::log.info "Caddy update entity published: installed $(installed_version), latest ${LATEST_VERSION:-unknown}"
 
 while true; do
     now=$(date +%s)
     if ((now - LAST_CHECK >= CHECK_INTERVAL)); then
         check_latest
-        publish_state false
+        NEED_ANNOUNCE=true
+    fi
+    if bashio::var.true "${NEED_ANNOUNCE}"; then
+        announce
     fi
     wait_for=$((LAST_CHECK + CHECK_INTERVAL - now))
     ((wait_for > 0)) || wait_for=60
 
     # A persistent QoS 1 session (-c) queues an Install pressed between
     # subscriptions. -W returns (exit 27) when nothing arrives in time.
+    # The will marks the entity unavailable if the container dies mid-wait.
     # Run in the background so the TERM trap fires straight away.
     mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-sub" -c -q 1 -C 1 -W "${wait_for}" \
+        --will-topic "${TOPIC}/availability" --will-payload offline --will-retain --will-qos 1 \
         -t "${TOPIC}/install" > /tmp/caddy-updater-cmd &
     rc=0
     wait $! || rc=$?
     if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 27 ]; then
         bashio::log.warning "MQTT subscribe failed (exit ${rc}); retrying in 60s"
+        NEED_ANNOUNCE=true
         sleep 60
         continue
     fi

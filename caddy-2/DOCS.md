@@ -163,9 +163,9 @@ Enables automatic upgrades for custom Caddy binaries and their plugins. Set this
 
 When a custom Caddy binary is present and an MQTT broker is available (e.g. the Mosquitto add-on), the add-on publishes an `update.caddy` entity to Home Assistant through MQTT discovery. The entity shows the custom binary's version against the latest stable Caddy release, checked every 6 hours.
 
-Pressing **Install** runs `caddy upgrade`, which downloads the latest Caddy built with the same plugins. The add-on then checks that the new binary runs and lists the same plugins, and restarts itself so the new binary is used. The previous binary is kept at `/config/caddy.bak`. If the check fails, it is restored automatically.
+Pressing **Install** runs `caddy upgrade`, which downloads the latest Caddy built with the same plugins. The add-on then checks that the new binary runs and lists the same plugins, and restarts itself so the new binary is used. The previous binary is kept at `/config/caddy.bak`, and is restored automatically if the check fails. On that restart, the add-on also validates your config with the new binary. If the new binary rejects the config but the previous one accepts it, the previous binary is restored, and the rejected one is kept at `/config/caddy.rejected`.
 
-Set this option to `false` to turn the entity off. It is on by default.
+Set this option to `false` to turn the entity off and remove it from Home Assistant. It is on by default. If no broker is available when the add-on starts, the entity appears once one is.
 
 **Note**: `caddy upgrade` uses the caddyserver.com build service, so every plugin must be one registered there. A binary with an unregistered or local plugin can't be upgraded this way.
 

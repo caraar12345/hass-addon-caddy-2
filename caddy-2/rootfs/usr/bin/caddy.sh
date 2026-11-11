@@ -130,6 +130,32 @@ non_caddyfile_config() {
     export PORT
 }
 
+# After the update entity upgrades the custom binary, check that it can load
+# the active config before running it. If it can't but the previous binary
+# can, go back to the previous one rather than fail to start.
+verify_upgraded_caddy() {
+    local marker="${CUSTOM_CADDY_PATH}.upgraded" backup="${CUSTOM_CADDY_PATH}.bak"
+
+    bashio::fs.file_exists "${marker}" || return 0
+    rm -f "${marker}"
+    ${CUSTOM_CADDY} || return 0
+
+    bashio::log.info "Caddy was just upgraded; validating the config with the new binary..."
+    if "${CADDY_PATH}" validate --config "${CONFIG_PATH}"; then
+        bashio::log.info "The upgraded Caddy accepts the config"
+        return 0
+    fi
+
+    if bashio::fs.file_exists "${backup}" && "${backup}" validate --config "${CONFIG_PATH}" > /dev/null 2>&1; then
+        bashio::log.error "The upgraded Caddy rejects the config but the previous binary accepts it; restoring ${backup}"
+        cp -p "${CUSTOM_CADDY_PATH}" "${CUSTOM_CADDY_PATH}.rejected"
+        cp -p "${backup}" "${CUSTOM_CADDY_PATH}"
+        "${CADDY_PATH}" version
+    else
+        bashio::log.warning "The config doesn't validate with the previous binary either, so keeping the upgraded one"
+    fi
+}
+
 caddy_fmt() {
     bashio::log.info 'Format Caddyfile...'
 
@@ -190,6 +216,9 @@ main() {
 
     # Prepare Caddyfile
     prepare_caddyfile
+
+    # Check a binary the update entity just upgraded
+    verify_upgraded_caddy
 
     # Format Caddyfile
     if bashio::config.true 'caddy_fmt'; then
