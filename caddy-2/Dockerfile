@@ -12,7 +12,7 @@ RUN \
   /data/caddy \
   \
   && apk add --no-cache \
-  nss-tools=3.118.1-r0 \
+  nss-tools \
   python3 py3-pip py3-yaml git openssh age mosquitto-clients
 
 # https://github.com/caddyserver/caddy/releases
