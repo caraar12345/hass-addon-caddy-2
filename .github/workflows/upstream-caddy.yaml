@@ -95,7 +95,7 @@ jobs:
               # so the release proves nothing). Not re-dispatched: a re-run
               # fails at the release step and would repeat every 15 minutes,
               # so fail loudly instead (failed scheduled runs are emailed).
-              missing=""
+              missing="" unknown=""
               for arch in amd64 aarch64; do
                 repo="${GITHUB_REPOSITORY}/caddy-2-${arch}"
                 token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token)
@@ -106,11 +106,26 @@ jobs:
                 case "$code" in
                   200) ;;
                   404) missing="$missing $arch" ;;
-                  *) echo "::warning::couldn't check ghcr.io/${repo}:${addon_version} (HTTP $code)" ;;
+                  *) unknown="$unknown $arch(HTTP $code)" ;;
                 esac
               done
+              if [ -n "$unknown" ]; then
+                echo "::error::couldn't confirm v${addon_version}'s image is published:${unknown}; will check again next run"
+                exit 1
+              fi
               if [ -n "$missing" ]; then
                 echo "::error::v${addon_version} is tagged but its image isn't published for:${missing}. Fix the build-and-deploy run for v${addon_version} and re-run it (delete its GitHub release first if that step fails), or: gh workflow run build-and-deploy.yaml --ref v${addon_version}"
+                exit 1
+              fi
+              # build-and-deploy's last step bumps the add-on store's
+              # submodule to the tag; check that happened too.
+              tag_sha=$(git ls-remote origin "refs/tags/v${addon_version}^{}" "refs/tags/v${addon_version}" | awk 'NR==1 {print $1}')
+              store_sha=$(gh api repos/caraar12345/home-assistant-addons/contents/caddy-2 --jq .sha) || {
+                echo "::error::couldn't read the add-on store's caddy-2 submodule; will check again next run"
+                exit 1
+              }
+              if [ "$store_sha" != "$tag_sha" ]; then
+                echo "::error::v${addon_version} is published but the add-on store's caddy-2 submodule is at ${store_sha}, not ${tag_sha}. Re-run the store's \"Auto-update addon store repository\" workflow with addon=caddy-2 and version=v${addon_version}."
                 exit 1
               fi
               echo "Up to date."

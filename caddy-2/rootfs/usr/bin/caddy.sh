@@ -102,6 +102,12 @@ caddy_upgrade() {
         return 0
     fi
 
+    # An earlier upgrade still waiting for verify_upgraded_caddy owns caddy.bak.
+    if bashio::fs.file_exists "${CUSTOM_CADDY_PATH}.upgraded"; then
+        bashio::log.info "Not upgrading: the last upgrade hasn't been validated yet"
+        return 0
+    fi
+
     bashio::log.info "Initiate upgrade"
     # Same safety net as the update entity: keep the previous binary and have
     # verify_upgraded_caddy check the new one against the config.
@@ -153,8 +159,10 @@ verify_upgraded_caddy() {
     local marker="${CUSTOM_CADDY_PATH}.upgraded" backup="${CUSTOM_CADDY_PATH}.bak"
 
     bashio::fs.file_exists "${marker}" || return 0
-    rm -f "${marker}"
-    ${CUSTOM_CADDY} || return 0
+    if ! ${CUSTOM_CADDY}; then
+        rm -f "${marker}"
+        return 0
+    fi
 
     # Validate the same config `run` gets: pass on the config-related
     # options from args, but not run-only ones.
@@ -174,8 +182,12 @@ verify_upgraded_caddy() {
     done
 
     bashio::log.info "Caddy was just upgraded; validating the config with the new binary..."
+    # The marker stays until validation and any rollback are done: while it
+    # exists, the update entity won't start another upgrade (which would
+    # overwrite caddy.bak).
     if "${CADDY_PATH}" validate "${validate_args[@]}"; then
         bashio::log.info "The upgraded Caddy accepts the config"
+        rm -f "${marker}"
         return 0
     fi
 
@@ -187,6 +199,7 @@ verify_upgraded_caddy() {
     else
         bashio::log.warning "The config doesn't validate with the previous binary either, so keeping the upgraded one"
     fi
+    rm -f "${marker}"
 }
 
 caddy_fmt() {
