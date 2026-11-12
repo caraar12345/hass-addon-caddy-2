@@ -1,0 +1,7 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Caddy 2
+# Publishes an MQTT update entity for a custom Caddy binary
+# ==============================================================================
+exec /usr/bin/caddy-updater.sh
