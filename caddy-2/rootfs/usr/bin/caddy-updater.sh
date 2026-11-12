@@ -187,7 +187,23 @@ upgrade() {
     bashio::addon.restart
 }
 
+WILL_PID=""
+
+start_will_holder() {
+    # A connection held open for the updater's whole life, carrying the
+    # retained "offline" last will: if the container dies at any point
+    # (including mid-upgrade), the broker marks the entity unavailable.
+    mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-will" -k 30 \
+        --will-topic "${TOPIC}/availability" --will-payload offline --will-retain --will-qos 1 \
+        -t "${TOPIC}/will" > /dev/null 2>&1 &
+    WILL_PID=$!
+    # Give it a moment to connect before "online" is published.
+    sleep 2
+}
+
 shutdown() {
+    # A clean disconnect doesn't send the will, so publish offline ourselves.
+    [ -z "${WILL_PID}" ] || kill "${WILL_PID}" 2>/dev/null || true
     pub "${TOPIC}/availability" "offline" -r || true
     exit 0
 }
@@ -204,11 +220,22 @@ announce() {
 }
 
 check_latest
+start_will_holder
 announce
 bashio::log.info "Caddy update entity published: installed $(installed_version), latest ${LATEST_VERSION:-unknown}"
 
 while true; do
     now=$(date +%s)
+    # Any failed publish (including from upgrade()) means retained messages
+    # may be missing or stale.
+    if bashio::var.true "${PUB_FAILED}"; then
+        NEED_ANNOUNCE=true
+    fi
+    if ! kill -0 "${WILL_PID}" 2>/dev/null; then
+        bashio::log.warning "MQTT will connection dropped; reconnecting"
+        start_will_holder
+        NEED_ANNOUNCE=true
+    fi
     if ((now - LAST_CHECK >= CHECK_INTERVAL)); then
         check_latest
         NEED_ANNOUNCE=true
@@ -218,13 +245,15 @@ while true; do
     fi
     wait_for=$((LAST_CHECK + CHECK_INTERVAL - now))
     ((wait_for > 0)) || wait_for=60
+    # Still failing: retry in 5 minutes rather than at the next check.
+    if bashio::var.true "${NEED_ANNOUNCE}" && ((wait_for > 300)); then
+        wait_for=300
+    fi
 
     # A persistent QoS 1 session (-c) queues an Install pressed between
     # subscriptions. -W returns (exit 27) when nothing arrives in time.
-    # The will marks the entity unavailable if the container dies mid-wait.
     # Run in the background so the TERM trap fires straight away.
     mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-sub" -c -q 1 -C 1 -W "${wait_for}" \
-        --will-topic "${TOPIC}/availability" --will-payload offline --will-retain --will-qos 1 \
         -t "${TOPIC}/install" > /tmp/caddy-updater-cmd &
     rc=0
     wait $! || rc=$?
