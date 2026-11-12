@@ -255,6 +255,12 @@ main() {
     # Prepare Caddy
     prepare_caddy
 
+    # Own the custom binary and caddy.bak from the startup upgrade until
+    # validation is done, so the update entity can't start an upgrade (and
+    # overwrite caddy.bak) in between. Shared with caddy-updater.sh.
+    exec 9> /run/caddy-binary.lock
+    flock 9
+
     # Upgrade Caddy
     if bashio::config.true 'caddy_upgrade'; then
         caddy_upgrade
@@ -265,6 +271,9 @@ main() {
 
     # Check a binary the update entity just upgraded
     verify_upgraded_caddy
+
+    # Release the lock, and don't hand the descriptor on to Caddy.
+    exec 9>&-
 
     # Format Caddyfile
     if bashio::config.true 'caddy_fmt'; then

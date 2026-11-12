@@ -19,6 +19,9 @@ readonly CHECK_INTERVAL=$((6 * 3600))
 readonly TOPIC="caddy-2/update"
 readonly DISCOVERY_TOPIC="homeassistant/update/caddy_2_caddy/config"
 readonly CLIENT_ID="caddy-2-updater"
+# Shared with caddy.sh: whoever holds it owns /config/caddy and caddy.bak
+# (an upgrade here, or caddy.sh's startup upgrade and validation).
+readonly BINARY_LOCK="/run/caddy-binary.lock"
 
 idle() {
     # Exiting would make s6 restart this service every second.
@@ -138,6 +141,18 @@ publish_discovery() {
 }
 
 upgrade() {
+    exec 8> "${BINARY_LOCK}"
+    if ! flock -n 8; then
+        bashio::log.warning "Caddy's startup is upgrading or validating the binary; ignoring Install"
+        publish_state false
+        exec 8>&-
+        return
+    fi
+    do_upgrade
+    exec 8>&-
+}
+
+do_upgrade() {
     local before after old_modules new_modules
     before=$(installed_version)
     # caddy.bak is the rollback for an upgrade caddy.sh hasn't validated yet;
