@@ -90,6 +90,29 @@ jobs:
             # ahead of its tag; release it now instead of skipping forever.
             addon_version=$(sed -nE 's/^version: *"?([^"[:space:]]+)"?.*/\1/p' caddy-2/config.yaml)
             if git ls-remote --exit-code --tags origin "refs/tags/v${addon_version}" > /dev/null; then
+              # Tagged, so build-and-deploy was started; check it published
+              # both images (its GitHub release is created before publishing,
+              # so the release proves nothing). Not re-dispatched: a re-run
+              # fails at the release step and would repeat every 15 minutes,
+              # so fail loudly instead (failed scheduled runs are emailed).
+              missing=""
+              for arch in amd64 aarch64; do
+                repo="${GITHUB_REPOSITORY}/caddy-2-${arch}"
+                token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token)
+                code=$(curl -s -o /dev/null -w '%{http_code}' -I \
+                  -H "Authorization: Bearer ${token}" \
+                  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+                  "https://ghcr.io/v2/${repo}/manifests/${addon_version}")
+                case "$code" in
+                  200) ;;
+                  404) missing="$missing $arch" ;;
+                  *) echo "::warning::couldn't check ghcr.io/${repo}:${addon_version} (HTTP $code)" ;;
+                esac
+              done
+              if [ -n "$missing" ]; then
+                echo "::error::v${addon_version} is tagged but its image isn't published for:${missing}. Fix the build-and-deploy run for v${addon_version} and re-run it (delete its GitHub release first if that step fails), or: gh workflow run build-and-deploy.yaml --ref v${addon_version}"
+                exit 1
+              fi
               echo "Up to date."
               echo "release=false" >> "$GITHUB_OUTPUT"
             else

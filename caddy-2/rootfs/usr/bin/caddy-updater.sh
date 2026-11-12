@@ -140,6 +140,13 @@ publish_discovery() {
 upgrade() {
     local before after old_modules new_modules
     before=$(installed_version)
+    # caddy.bak is the rollback for an upgrade caddy.sh hasn't validated yet;
+    # don't overwrite it with the unvalidated binary.
+    if bashio::fs.file_exists "${CADDY_BIN}.upgraded"; then
+        bashio::log.warning "The last upgrade hasn't been validated yet (add-on restart pending); ignoring Install"
+        publish_state false
+        return
+    fi
     bashio::log.info "Upgrading Caddy ${before} with the same plugins..."
     publish_state true
 

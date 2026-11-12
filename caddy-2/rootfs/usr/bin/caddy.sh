@@ -86,12 +86,28 @@ caddy_upgrade() {
     if ! ${CUSTOM_CADDY}; then
         bashio::log.info "Cannot upgrade Caddy as no custom binary has been found"
         return 0
-    elif [ "$(${CADDY_PATH} version | awk '{print $1}')" == "$(curl -sL https://api.github.com/repos/caddyserver/caddy/releases/latest | jq -r '.tag_name')" ]; then
+    fi
+
+    local latest
+    latest=$(curl -sL https://api.github.com/repos/caddyserver/caddy/releases/latest | jq -r '.tag_name')
+    if [ "$(${CADDY_PATH} version | awk '{print $1}')" == "${latest}" ]; then
         bashio::log.info "Custom Caddy uses the latest version"
         return 0
-    else
-        bashio::log.info "Initiate upgrade"
-        "${CADDY_PATH}" upgrade
+    fi
+
+    # Don't keep reinstalling a release verify_upgraded_caddy already rolled back.
+    if bashio::fs.file_exists "${CUSTOM_CADDY_PATH}.rejected" \
+        && [ "$("${CUSTOM_CADDY_PATH}.rejected" version 2>/dev/null | awk '{print $1}')" == "${latest}" ]; then
+        bashio::log.warning "Not upgrading to ${latest}: it rejected the config before (${CUSTOM_CADDY_PATH}.rejected)"
+        return 0
+    fi
+
+    bashio::log.info "Initiate upgrade"
+    # Same safety net as the update entity: keep the previous binary and have
+    # verify_upgraded_caddy check the new one against the config.
+    cp -p "${CUSTOM_CADDY_PATH}" "${CUSTOM_CADDY_PATH}.bak"
+    if "${CADDY_PATH}" upgrade && ! cmp -s "${CUSTOM_CADDY_PATH}" "${CUSTOM_CADDY_PATH}.bak"; then
+        touch "${CUSTOM_CADDY_PATH}.upgraded"
     fi
 }
 
@@ -140,13 +156,30 @@ verify_upgraded_caddy() {
     rm -f "${marker}"
     ${CUSTOM_CADDY} || return 0
 
+    # Validate the same config `run` gets: pass on the config-related
+    # options from args, but not run-only ones.
+    local -a validate_args=(--config "${CONFIG_PATH}")
+    local i=0
+    while ((i < ${#args[@]})); do
+        case "${args[i]}" in
+            --adapter|--envfile)
+                validate_args+=("${args[i]}" "${args[i + 1]:-}")
+                i=$((i + 1))
+                ;;
+            --adapter=*|--envfile=*)
+                validate_args+=("${args[i]}")
+                ;;
+        esac
+        i=$((i + 1))
+    done
+
     bashio::log.info "Caddy was just upgraded; validating the config with the new binary..."
-    if "${CADDY_PATH}" validate --config "${CONFIG_PATH}"; then
+    if "${CADDY_PATH}" validate "${validate_args[@]}"; then
         bashio::log.info "The upgraded Caddy accepts the config"
         return 0
     fi
 
-    if bashio::fs.file_exists "${backup}" && "${backup}" validate --config "${CONFIG_PATH}" > /dev/null 2>&1; then
+    if bashio::fs.file_exists "${backup}" && "${backup}" validate "${validate_args[@]}" > /dev/null 2>&1; then
         bashio::log.error "The upgraded Caddy rejects the config but the previous binary accepts it; restoring ${backup}"
         cp -p "${CUSTOM_CADDY_PATH}" "${CUSTOM_CADDY_PATH}.rejected"
         cp -p "${backup}" "${CUSTOM_CADDY_PATH}"
