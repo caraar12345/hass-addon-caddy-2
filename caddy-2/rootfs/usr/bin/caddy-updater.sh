@@ -188,17 +188,36 @@ upgrade() {
 }
 
 WILL_PID=""
+WILL_LOG="/tmp/caddy-updater-will"
 
 start_will_holder() {
     # A connection held open for the updater's whole life, carrying the
     # retained "offline" last will: if the container dies at any point
     # (including mid-upgrade), the broker marks the entity unavailable.
-    mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-will" -k 30 \
+    # Returns success only once the connection is confirmed (a probe
+    # published to its topic comes back through it), so "online" is never
+    # published without a will behind it.
+    [ -z "${WILL_PID}" ] || kill "${WILL_PID}" 2>/dev/null || true
+    : > "${WILL_LOG}"
+    mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-will" -k 30 -q 1 \
         --will-topic "${TOPIC}/availability" --will-payload offline --will-retain --will-qos 1 \
-        -t "${TOPIC}/will" > /dev/null 2>&1 &
+        -t "${TOPIC}/will" >> "${WILL_LOG}" 2>/dev/null &
     WILL_PID=$!
-    # Give it a moment to connect before "online" is published.
-    sleep 2
+
+    local probe attempt
+    probe="probe-$$-$(date +%s%N)"
+    for attempt in $(seq 1 10); do
+        mosquitto_pub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-pub" -q 1 -t "${TOPIC}/will" -m "${probe}" 2>/dev/null || true
+        sleep 1
+        if grep -qx "${probe}" "${WILL_LOG}" 2>/dev/null; then
+            : > "${WILL_LOG}"
+            return 0
+        fi
+        kill -0 "${WILL_PID}" 2>/dev/null || break
+    done
+    bashio::log.warning "Couldn't confirm the MQTT will connection (attempt gave up after ${attempt}s); not marking the entity online yet"
+    kill "${WILL_PID}" 2>/dev/null || true
+    return 1
 }
 
 shutdown() {
@@ -220,8 +239,11 @@ announce() {
 }
 
 check_latest
-start_will_holder
-announce
+if start_will_holder; then
+    announce
+else
+    NEED_ANNOUNCE=true
+fi
 bashio::log.info "Caddy update entity published: installed $(installed_version), latest ${LATEST_VERSION:-unknown}"
 
 while true; do
@@ -231,16 +253,18 @@ while true; do
     if bashio::var.true "${PUB_FAILED}"; then
         NEED_ANNOUNCE=true
     fi
+    will_ok=true
     if ! kill -0 "${WILL_PID}" 2>/dev/null; then
-        bashio::log.warning "MQTT will connection dropped; reconnecting"
-        start_will_holder
+        bashio::log.warning "MQTT will connection is down; reconnecting"
+        start_will_holder || will_ok=false
         NEED_ANNOUNCE=true
     fi
     if ((now - LAST_CHECK >= CHECK_INTERVAL)); then
         check_latest
         NEED_ANNOUNCE=true
     fi
-    if bashio::var.true "${NEED_ANNOUNCE}"; then
+    # Only (re)announce "online" with a confirmed will connection.
+    if bashio::var.true "${NEED_ANNOUNCE}" && bashio::var.true "${will_ok}"; then
         announce
     fi
     wait_for=$((LAST_CHECK + CHECK_INTERVAL - now))
