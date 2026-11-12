@@ -202,42 +202,54 @@ do_upgrade() {
     bashio::addon.restart
 }
 
-WILL_PID=""
-WILL_LOG="/tmp/caddy-updater-will"
+CONN_PID=""
+readonly FIFO="/tmp/caddy-updater.fifo"
+PENDING_INSTALL=false
 
-start_will_holder() {
-    # A connection held open for the updater's whole life, carrying the
-    # retained "offline" last will: if the container dies at any point
-    # (including mid-upgrade), the broker marks the entity unavailable.
-    # Returns success only once the connection is confirmed (a probe
-    # published to its topic comes back through it), so "online" is never
-    # published without a will behind it.
-    [ -z "${WILL_PID}" ] || kill "${WILL_PID}" 2>/dev/null || true
-    : > "${WILL_LOG}"
-    mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-will" -k 30 -q 1 \
+connect() {
+    # One long-lived connection that carries the retained "offline" last
+    # will AND receives Install commands, read by the main loop through a
+    # FIFO. If it dies at any point, the broker publishes the will and the
+    # loop's next read hits EOF straight away, so "online" can never stay
+    # retained without a live will behind it.
+    # Returns success only once a probe published to its own topic comes
+    # back through it, i.e. it's connected and subscribed.
+    [ -z "${CONN_PID}" ] || kill "${CONN_PID}" 2>/dev/null || true
+    exec 7<&- 2>/dev/null || true
+    rm -f "${FIFO}"
+    mkfifo "${FIFO}"
+    # Persistent QoS 1 session (-c): an Install pressed while disconnected is
+    # delivered on reconnect.
+    mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-sub" -c -q 1 -k 30 -v \
         --will-topic "${TOPIC}/availability" --will-payload offline --will-retain --will-qos 1 \
-        -t "${TOPIC}/will" >> "${WILL_LOG}" 2>/dev/null &
-    WILL_PID=$!
+        -t "${TOPIC}/install" -t "${TOPIC}/will" > "${FIFO}" 2>/dev/null &
+    CONN_PID=$!
+    exec 7< "${FIFO}"
 
-    local probe attempt
+    local probe line rc deadline
     probe="probe-$$-$(date +%s%N)"
-    for attempt in $(seq 1 10); do
-        mosquitto_pub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-pub" -q 1 -t "${TOPIC}/will" -m "${probe}" 2>/dev/null || true
-        sleep 1
-        if grep -qx "${probe}" "${WILL_LOG}" 2>/dev/null; then
-            : > "${WILL_LOG}"
-            return 0
+    deadline=$(($(date +%s) + 10))
+    pub "${TOPIC}/will" "${probe}"
+    while (($(date +%s) < deadline)); do
+        if read -r -t 1 -u 7 line; then
+            case "${line}" in
+                "${TOPIC}/will ${probe}") return 0 ;;
+                "${TOPIC}/install install") PENDING_INSTALL=true ;;
+            esac
+        else
+            rc=$?
+            ((rc > 128)) || break # EOF: the connection died
+            pub "${TOPIC}/will" "${probe}"
         fi
-        kill -0 "${WILL_PID}" 2>/dev/null || break
     done
-    bashio::log.warning "Couldn't confirm the MQTT will connection (attempt gave up after ${attempt}s); not marking the entity online yet"
-    kill "${WILL_PID}" 2>/dev/null || true
+    bashio::log.warning "Couldn't confirm the MQTT connection; not marking the entity online yet"
+    kill "${CONN_PID}" 2>/dev/null || true
     return 1
 }
 
 shutdown() {
     # A clean disconnect doesn't send the will, so publish offline ourselves.
-    [ -z "${WILL_PID}" ] || kill "${WILL_PID}" 2>/dev/null || true
+    [ -z "${CONN_PID}" ] || kill "${CONN_PID}" 2>/dev/null || true
     pub "${TOPIC}/availability" "offline" -r || true
     exit 0
 }
@@ -254,34 +266,46 @@ announce() {
 }
 
 check_latest
-if start_will_holder; then
+CONNECTED=false
+if connect; then
+    CONNECTED=true
     announce
 else
     NEED_ANNOUNCE=true
 fi
-bashio::log.info "Caddy update entity published: installed $(installed_version), latest ${LATEST_VERSION:-unknown}"
+bashio::log.info "Caddy update entity started: installed $(installed_version), latest ${LATEST_VERSION:-unknown}"
 
 while true; do
+    if ! bashio::var.true "${CONNECTED}"; then
+        if connect; then
+            CONNECTED=true
+            NEED_ANNOUNCE=true
+        else
+            sleep 60
+            continue
+        fi
+    fi
+
     now=$(date +%s)
     # Any failed publish (including from upgrade()) means retained messages
     # may be missing or stale.
     if bashio::var.true "${PUB_FAILED}"; then
         NEED_ANNOUNCE=true
     fi
-    will_ok=true
-    if ! kill -0 "${WILL_PID}" 2>/dev/null; then
-        bashio::log.warning "MQTT will connection is down; reconnecting"
-        start_will_holder || will_ok=false
-        NEED_ANNOUNCE=true
-    fi
     if ((now - LAST_CHECK >= CHECK_INTERVAL)); then
         check_latest
         NEED_ANNOUNCE=true
     fi
-    # Only (re)announce "online" with a confirmed will connection.
-    if bashio::var.true "${NEED_ANNOUNCE}" && bashio::var.true "${will_ok}"; then
+    if bashio::var.true "${NEED_ANNOUNCE}"; then
         announce
     fi
+    if bashio::var.true "${PENDING_INSTALL}"; then
+        PENDING_INSTALL=false
+        check_latest
+        upgrade
+        continue
+    fi
+
     wait_for=$((LAST_CHECK + CHECK_INTERVAL - now))
     ((wait_for > 0)) || wait_for=60
     # Still failing: retry in 5 minutes rather than at the next check.
@@ -289,23 +313,22 @@ while true; do
         wait_for=300
     fi
 
-    # A persistent QoS 1 session (-c) queues an Install pressed between
-    # subscriptions. -W returns (exit 27) when nothing arrives in time.
-    # Run in the background so the TERM trap fires straight away.
-    mosquitto_sub "${MQTT_ARGS[@]}" -i "${CLIENT_ID}-sub" -c -q 1 -C 1 -W "${wait_for}" \
-        -t "${TOPIC}/install" > /tmp/caddy-updater-cmd &
-    rc=0
-    wait $! || rc=$?
-    if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 27 ]; then
-        bashio::log.warning "MQTT subscribe failed (exit ${rc}); retrying in 60s"
-        NEED_ANNOUNCE=true
-        sleep 60
-        continue
-    fi
-
-    if [ "$(cat /tmp/caddy-updater-cmd 2>/dev/null)" = "install" ]; then
-        : > /tmp/caddy-updater-cmd
-        check_latest
-        upgrade
+    # read returns >128 on timeout (time for the periodic check) and 1 on
+    # EOF (the connection died). The read is interrupted by TERM, so the
+    # trap still fires straight away.
+    if read -r -t "${wait_for}" -u 7 line; then
+        if [ "${line}" = "${TOPIC}/install install" ]; then
+            check_latest
+            upgrade
+        fi
+    else
+        rc=$?
+        if ((rc <= 128)); then
+            bashio::log.warning "MQTT connection lost; reconnecting"
+            # The will has normally done this already; make sure.
+            pub "${TOPIC}/availability" "offline" -r
+            CONNECTED=false
+            sleep 5
+        fi
     fi
 done
